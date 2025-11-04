@@ -1,0 +1,1071 @@
+---
+title: "cell cell communication"
+author: "Team 1"
+date: "Feb 3 2024"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 1
+  html_document:
+    toc: true
+    toc_depth: '1'
+    df_print: paged
+---
+
+
+
+
+```{r, setup, include=FALSE}
+library(knitr)
+
+opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=FALSE,
+               message=FALSE, warning=FALSE, echo=FALSE,
+               fig.height = 3.5, fig.width = 5.5, fig.align = "center")
+```
+
+
+
+
+
+```{r}
+setwd("/Users/dengjialing/Downloads")
+library(readr)
+library(tidyverse)
+experiment_wt11 <- read_csv("WT_230111.csv")
+colnames(experiment_wt11)[1] <- "Droplet_ID"
+head(experiment_wt11)
+cell_columns <- colnames(experiment_wt11)[4:ncol(experiment_wt11)]
+experiment_wt11$cell_count <- rowSums(!is.na(experiment_wt11[, cell_columns]))
+
+```
+
+### KS test.
+```{r}
+
+library(ggplot2)
+
+
+# Extract the number of cells per droplet from the dataset
+cell_counts <- experiment_wt11$cell_count  
+
+
+ggplot(experiment_wt11, aes(x = cell_count)) +
+  geom_histogram(aes(y = after_stat(density)),bins=60, fill ="darkgreen",color="black", alpha = 0.7) +
+ geom_density(color = "blue", size = 1) +  
+  labs(title = "Histogram of Cell Counts per Droplet",
+       x = "Number of Cells per Droplet",
+       y = "Frequency") +
+  theme_minimal()
+
+
+ggplot(experiment_wt11, aes(x = log(cell_count))) +
+  geom_histogram(aes(y = after_stat(density)),bins=40, fill ="skyblue",color="black", alpha = 0.9) +
+ geom_density(color = "blue", size = 1) +  
+  labs(title = "Histogram of Log Cell Counts per Droplet",
+       x = "Log of Number of Cells per Droplet",
+       y = "Frequency") +
+  theme_minimal()
+
+
+# Estimate Poisson lambda (mean)
+lambda_hat <- mean(cell_counts)
+# Perform KS test to compare observed data to Poisson distribution
+ks_test_result <- ks.test(cell_counts, "ppois", lambda_hat)
+
+
+print(ks_test_result)
+
+
+
+```
+
+```{r}
+summary_stats <- experiment_wt11 %>%
+  group_by(protein_type) %>%
+  summarise(
+    mean_cells = mean(cell_count, na.rm = TRUE),
+    median_cells = median(cell_count, na.rm = TRUE),
+    min_cells = min(cell_count, na.rm = TRUE),
+    max_cells = max(cell_count, na.rm = TRUE),
+    sd_cells = sd(cell_count, na.rm = TRUE)
+  )
+
+print(summary_stats)
+```
+
+```{r}
+experiment_wt11$time <- str_split_fixed(experiment_wt11$Droplet_ID, "_", 3)[,1]
+```
+
+
+### filter out the 4 hours only 
+
+```{r}
+experiment_wt11_4h<- experiment_wt11 %>% filter(time == "4h")
+experiment_wt11_4h_green <- experiment_wt11 %>% filter(time == "4h"&protein_type=="mNeongreen")
+numeric_columns <- experiment_wt11_4h_green %>%
+  select_if(is.numeric) %>%
+  colnames()
+
+numeric_columns <- setdiff(numeric_columns, c("Droplet_ID", "time", "protein_type"))
+experiment_wt11_4h_green <- experiment_wt11_4h_green %>%
+
+  rowwise() %>%
+  mutate(mean_intensity = mean(c_across(all_of(numeric_columns)), na.rm = TRUE)) %>%
+  ungroup()
+
+experiment_wt11_4h_green$log_counts<-log(experiment_wt11_4h_green$cell_count)
+
+
+experiment_wt11_4h_green%>%ggplot(aes(x = cell_count)) +
+  geom_histogram(aes(y = after_stat(density)),bins = 40, fill = "darkgreen", color = "black", alpha = 0.7) +
+  geom_density(color = "blue", size = 1)+
+  labs(title = "Histogram of Cell Counts per Droplet (4 Hours, mNeonGreen)",
+       x = "Number of Cells per Droplet ",
+       y = "Count") +
+  theme_minimal()
+
+
+
+
+
+
+
+cell_counts_4h<-experiment_wt11_4h_green$log_counts
+lambda_hat <- mean(cell_counts_4h)
+ks_test_result <- ks.test(cell_counts_4h, "pnorm", lambda_hat)
+print(ks_test_result)
+
+
+```
+
+```{r}
+ggplot(experiment_wt11_4h_green %>% filter(protein_type == "mNeongreen"), aes(x = mean_intensity)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 15, fill = "blue",color="black",alpha = 0.7) +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Histogram of Droplet Mean Brightness (4 Hours, mNeongreen)",
+       x = "Mean Brightness per Droplet",
+       y = "Density") +
+  theme_minimal()
+```
+```{r}
+experiment_wt11_4h_red <- experiment_wt11 %>% filter(time == "4h"&protein_type=="mCardinal")
+write.csv(experiment_wt11_4h_red, "experiment_wt11_4h_red.csv", row.names = FALSE)
+
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+df <- read.csv("experiment_wt11_4h_red.csv")
+set.seed(123) 
+selected_droplets <- sample(unique(df$Droplet_ID), 10)
+
+filtered_df <- df %>%
+  filter(Droplet_ID %in% selected_droplets)
+
+long_df <- filtered_df %>%
+  pivot_longer(cols = starts_with("cell"), names_to = "Cell", values_to = "Intensity") %>%
+  drop_na()  
+global_mean_wt <- median(long_df$Intensity, na.rm = TRUE)
+
+
+ggplot(long_df, aes(x = Droplet_ID, y = Intensity)) +
+  geom_boxplot(aes(fill = Droplet_ID)) +
+  geom_hline(yintercept = global_mean_wt, color = "green", linetype = "dashed", linewidth = 1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Box Plot of Intensity for 10 Randomly Selected Droplets", 
+    x = "Droplet ID", 
+    y = "Intensity"
+  )
+
+
+
+ggplot(long_df, aes(x = Droplet_ID, y = log(Intensity))) +
+  geom_boxplot(aes(fill = Droplet_ID), color = "black") +
+  geom_hline(yintercept = log(global_mean_wt), color = "green", linetype = "dashed", linewidth = 1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Box Plot of Intensity (transformed)", 
+    x = "Droplet ID",
+    y = "Log transformed Intensity"
+  )
+
+```
+
+
+
+
+
+
+
+
+### For the 2nd data tab.
+
+```{r}
+setwd("/Users/dengjialing/Downloads")
+
+library(readr)
+library(tidyverse)
+experiment_ko11 <- read_csv("KO_230111.csv")
+
+head(experiment_ko11)
+
+cell_columns <- colnames(experiment_ko11)[3:ncol(experiment_ko11)]
+
+experiment_ko11$cell_count <- rowSums(!is.na(experiment_ko11[, cell_columns]))
+
+
+experiment_ko11$time <- str_split_fixed(experiment_ko11$droplet_ID, "_", 3)[,1]
+
+
+```
+
+# Summary stats of cell numbers.
+```{r}
+summary_stats_111 <- experiment_ko11 %>%
+  group_by(protein_type) %>%
+  summarise(
+    mean_cells = mean(cell_count, na.rm = TRUE),
+    median_cells = median(cell_count, na.rm = TRUE),
+    min_cells = min(cell_count, na.rm = TRUE),
+    max_cells = max(cell_count, na.rm = TRUE),
+    sd_cells = sd(cell_count, na.rm = TRUE)
+  )
+
+print(summary_stats_111)
+```
+```{r}
+experiment_ko11_4h <- experiment_ko11 %>% filter(time == "4h"&protein_type=="mNeongreen")
+numeric_columns <- experiment_ko11_4h %>%
+  select_if(is.numeric) %>%
+  colnames()
+
+numeric_columns <- setdiff(numeric_columns, c("Droplet_ID", "time", "protein_type"))
+experiment_ko11_4h <- experiment_ko11_4h %>%
+
+  rowwise() %>%
+  mutate(mean_intensity = mean(c_across(all_of(numeric_columns)), na.rm = TRUE)) %>%
+  ungroup()
+
+experiment_ko11_4h$log_counts<-log(experiment_ko11_4h$cell_count)
+
+
+experiment_ko11_4h%>%ggplot(aes(x = cell_count)) +
+  geom_histogram(aes(y = after_stat(density)),bins = 40, fill = "skyblue", color = "black", alpha = 0.7) +
+  geom_density(color = "blue", size = 1)+
+  labs(title = "Histogram of Cell Counts per Droplet (4 Hours, mNeonGreen)",
+       x = "Number of Cells per Droplet ",
+       y = "Count") +
+  theme_minimal()
+
+
+cell_counts_ko4h<-experiment_ko11_4h$log_counts
+lambda_hat2 <- mean(cell_counts_ko4h)
+ks_test_result2 <- ks.test(cell_counts_ko4h, "pnorm", lambda_hat2)
+print(ks_test_result2)
+
+
+```
+
+
+
+```{r}
+experiment_ko11_4h_red <- experiment_ko11 %>% filter(time == "4h"&protein_type=="mCardinal")
+write.csv(experiment_ko11_4h_red, "experiment_ko11_4h_red.csv", row.names = FALSE)
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+df2 <- read.csv("experiment_ko11_4h_red.csv")
+set.seed(123)  # Ensure reproducibility
+selected_droplets <- sample(unique(df2$droplet_ID), 10)
+
+
+filtered_df2 <- df2 %>%
+  filter(droplet_ID %in% selected_droplets)
+
+
+long_df2 <- filtered_df2 %>%
+  pivot_longer(cols = starts_with("cell"), names_to = "Cell", values_to = "Intensity") %>%
+  drop_na()  
+
+global_mean_ko <- median(long_df2$Intensity, na.rm = TRUE)
+
+ggplot(long_df2, aes(x = droplet_ID, y = Intensity)) +
+  geom_boxplot(aes(fill = droplet_ID)) +
+  geom_hline(yintercept = global_mean_ko , color = "green", linetype = "dashed", linewidth = 1)+
+  labs(title = "Box Plot of Intensity KO11_4h", 
+       x = "Droplet ID", 
+       y = "Intensity")+
+  theme_minimal()+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Box plot of sqrt intensities for the selected droplets
+ggplot(long_df2, aes(x = droplet_ID, y = log(Intensity))) +
+  geom_boxplot(aes(fill = droplet_ID)) +
+  geom_hline(yintercept = log(global_mean_ko), color = "green", linetype = "dashed", linewidth = 1) +
+  labs(title = "Box Plot of Log Intensity KO11_4h", 
+       x = "Droplet ID", 
+       y = "Log transformed Intensity")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+```
+
+```{r}
+
+library(ggplot2)
+
+# WT group plot
+ggplot(long_df, aes(x = Droplet_ID, y = log(Intensity))) + 
+  geom_boxplot(fill = "lightblue", color = "black") +
+  geom_hline(yintercept = log(global_mean_wt), color = "green", linetype = "dashed", linewidth = 1) +
+  ylim(0, 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Box Plot of Log Intensity for WT group",
+    x = "Droplet ID",
+    y = "Log Intensity"
+  ) +
+  theme_minimal()+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# KO group plot
+ggplot(long_df2, aes(x = droplet_ID, y = log(Intensity))) + 
+  geom_boxplot(fill = "salmon") +
+  geom_hline(yintercept = log(global_mean_ko), color = "green", linetype = "dashed", linewidth = 1) +
+  ylim(0, 10) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Box Plot of Log Intensity for KO group",
+    x = "Droplet ID",
+    y = "Log Intensity"
+  ) +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+### model1
+```{r}
+
+
+library(tidyverse)
+library(lme4)
+library(readr)
+library(knitr)
+
+
+
+experiment_wt11_4h%>%
+  group_by(Droplet_ID)%>%
+  filter(protein_type=="mCardinal")
+
+wt_long <- experiment_wt11_4h %>%
+  pivot_longer(
+    cols = starts_with("cell"), 
+    names_to = "cell",
+    values_to = "intensity"
+  )
+
+
+
+wt_long_clean_wt<-wt_long%>%
+  filter(!is.na(intensity) & intensity>0&protein_type=="mCardinal")
+
+
+model1 <- lmer(log(intensity) ~ 1+(1 | Droplet_ID), data = wt_long_clean_wt)
+
+
+summary(model1)
+
+fixef_estimate <- summary(model1)$coefficients["(Intercept)", "Estimate"]
+fixef_se <- summary(model1)$coefficients["(Intercept)", "Std. Error"]
+
+
+var_components <- as.data.frame(VarCorr(model1))
+var_droplet <- var_components$vcov[var_components$grp == "Droplet_ID"]
+var_residual <- var_components$vcov[var_components$grp == "Residual"]
+
+
+icc <- var_droplet / (var_droplet + var_residual)
+
+
+summary_table <- data.frame(
+  Effect = c("Intercept", "Random Effect: Droplet_ID", "Residual", "ICC"),
+  Estimate = c(
+    round(fixef_estimate, 5),
+    round(var_droplet, 5),
+    round(var_residual, 5),
+    round(icc, 5)
+  ),
+  `Std. Dev.` = c(
+    round(fixef_se, 5),
+    round(sqrt(var_droplet), 5),
+    round(sqrt(var_residual), 5),
+    NA
+  )
+)
+
+# Show table
+kable(summary_table, caption = "Model Summary and ICC", align = 'lcc')
+
+
+```
+
+This model for the WT dataset shows that droplet-level effects are modest but non-negligible. The fixed effect intercept estimate of 7.33 reflects the average intensity across all observations when random effects are centered at zero.
+
+The Droplet_ID random effect variance is estimated at 0.1205 (SD = 0.3472), while the residual variance is higher at 0.7677 (SD = 0.8762), indicating that most of the variability in intensity comes from differences within droplets, not between them.
+
+An ICC of approximately 0.135 suggests that around 13.5% of total variance is due to droplet-level differences — a notable increase compared to previous estimates (0.28%). Thus, incorporating the random intercept for Droplet_ID contributes meaningfully to the model's explanatory power.
+
+
+```{r}
+#install.packages("merTools")  
+library(merTools)  
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+pred_int<-predictInterval(model1)  
+
+plotREsim(REsim(model1)) +
+  ggtitle("Effect Ranges for WT at 4 Hrs") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.title.position = "plot"
+  )
+
+
+
+wt_df<-REsim(model1)             
+
+
+wt_df <- wt_df %>%
+  mutate(
+    lower = mean - 1.96 * sd,
+    upper = mean + 1.96 * sd,
+    effect_type = case_when(
+      upper < 0 ~ "Below Mean",
+      lower > 0 ~ "Above Mean",
+      TRUE ~ "Not Different"
+    )
+  )
+
+selected_droplets <- wt_df %>%
+  group_by(effect_type) %>%
+  slice_min(median, n = 3) %>%  # you can use `slice_sample` for variety
+  ungroup()
+
+
+df_selected <- wt_long_clean_wt %>%
+  filter(Droplet_ID %in% selected_droplets$groupID) %>%
+  pivot_longer(cols = starts_with("cell"), names_to = "Cell", values_to = "Intensity") %>%
+  drop_na()
+
+droplet_order <- df_selected %>%
+  group_by(Droplet_ID) %>%
+  summarize(median_val = median(intensity)) %>%
+  arrange(median_val)
+
+df_selected <- df_selected %>%
+  mutate(Droplet_ID = factor(Droplet_ID, levels = droplet_order$Droplet_ID))
+
+global_mean <- mean(wt_long_clean_wt$intensity, na.rm = TRUE)
+
+ggplot(df_selected, aes(x = Droplet_ID, y = log(intensity))) +
+  geom_boxplot(aes(fill = Droplet_ID), show.legend = FALSE) +
+  geom_hline(yintercept = log(global_mean), color = "red", linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "Boxplots of Droplets (Selected by Significance)",
+    subtitle = "Red dashed line = global mean intensity",
+    x = "Droplet ID", y = "Intensity"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+```
+each dot represents a specific Droplet_ID, showing how it deviates from the model's overall intercept. The vertical position of each dot represents the estimated deviation of that droplet from the overall intercept, and the vertical lines through each dot represent the confidence intervals for the random effect estimate of each Droplet_ID. The red horizontal line  represents the overall model intercept (the average predicted log intensity across all droplets). I
+Since all of the confidence intervals include 0,  a further interpretation is that the
+average intensity for each droplet is not  statistically significantly
+different from one another.
+
+
+### model1 ko group 
+```{r}
+library(tidyverse)
+#install.packages("lme4")
+library(lme4)
+
+wt_long_ko <- experiment_ko11_4h_red %>%
+  pivot_longer(
+    cols = starts_with("cell"), 
+    names_to = "cell",
+    values_to = "intensity"
+  )
+wt_long_ko_clean<-wt_long_ko%>%
+filter(!is.na(intensity) & intensity>0)
+
+
+
+model1_ko <- lmer(log(intensity) ~ 1+(1 | droplet_ID), data = wt_long_ko_clean)
+
+
+summary(model1_ko)
+
+ranef(model1_ko)$droplet_ID %>% head(5)
+coef(model1_ko)$droplet_ID %>% head(5)
+
+
+
+fixef_estimate_ko <- summary(model1_ko)$coefficients["(Intercept)", "Estimate"]
+fixef_se_ko <- summary(model1_ko)$coefficients["(Intercept)", "Std. Error"]
+
+
+var_components_ko <- as.data.frame(VarCorr(model1_ko))
+var_droplet_ko <- var_components_ko$vcov[var_components_ko$grp == "droplet_ID"]
+var_residual_ko <- var_components_ko$vcov[var_components_ko$grp == "Residual"]
+
+
+icc_ko <- var_droplet_ko / (var_droplet_ko + var_residual_ko)
+
+
+summary_table_ko <- data.frame(
+  Effect = c("Intercept", "Random Effect: Droplet_ID", "Residual", "ICC"),
+  Estimate = c(
+    round(as.numeric(fixef_estimate_ko), 5),
+    round(as.numeric(var_droplet_ko), 5),
+    round(as.numeric(var_residual_ko), 5),
+    round(as.numeric(icc_ko), 5)
+  ),
+  `Std. Dev.` = c(
+    round(as.numeric(fixef_se_ko), 5),
+    round(sqrt(as.numeric(var_droplet_ko)), 5),
+    round(sqrt(as.numeric(var_residual_ko)), 5),
+    NA
+  )
+)
+
+
+library(knitr)
+kable(summary_table_ko, caption = "Model Summary and ICC (KO)", align = 'lcc')
+
+```
+Fixed Effect
+Intercept:
+
+Estimate = 6.75348, Std. Dev. = 0.03086
+
+This represents the average intensity across all observations in the KO condition, after 
+accounting for droplet-level variation. It’s notably lower than the WT condition, reflecting 
+a potential effect of the knockout.
+
+
+Random Effects
+Random Effect: Droplet_ID
+
+Estimate (variance) = 0.02797, Std. Dev. = 0.16724
+
+This captures the between-droplet variability. The value is higher than in the WT condition, suggesting that droplets in the KO condition differ more from each other in their average intensity than in WT.
+
+Residual
+
+Estimate (variance) = 0.54262, Std. Dev. = 0.73663
+
+This is the within-droplet variability, i.e., how much intensity varies among cells in the same droplet. It is much lower than in WT, suggesting that individual cell intensity values are more consistent within droplets in the KO condition.
+
+Intra-class Correlation Coefficient (ICC)
+ICC = 0.04902
+
+An ICC of 0.049 means that about 4.9% of the variance in cell intensity is due to between-droplet differences. This is higher than in the WT model (ICC = 0.0028), suggesting that droplet-level effects play a larger, though still modest, role in the KO condition.
+
+
+
+
+```{r}
+
+#install.packages("merTools")  
+library(merTools)  
+
+
+pred_int <- predictInterval(model1_ko, level = 0.95) 
+
+re_df<-REsim(model1_ko)             
+plotREsim(REsim(model1_ko)) +
+  ggtitle("Effect Ranges for WT at 4 Hrs") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.title.position = "plot"
+  )
+
+
+re_df <- re_df %>%
+  mutate(
+    lower = mean - 1.96 * sd,
+    upper = mean + 1.96 * sd,
+    effect_type = case_when(
+      upper < 0 ~ "Below Mean",
+      lower > 0 ~ "Above Mean",
+      TRUE ~ "Not Different"
+    )
+  )
+
+selected_droplets <- re_df %>%
+  group_by(effect_type) %>%
+  slice_min(median, n = 3) %>%  # you can use `slice_sample` for variety
+  ungroup()
+
+# Step 2: Filter main dataset for selected droplets
+df_selected <- wt_long_ko_clean %>%
+  filter(droplet_ID %in% selected_droplets$groupID) %>%
+  pivot_longer(cols = starts_with("cell"), names_to = "Cell", values_to = "Intensity") %>%
+  drop_na()
+
+# Step 3: Order by droplet median
+droplet_order <- df_selected %>%
+  group_by(droplet_ID) %>%
+  summarize(median_val = median(intensity)) %>%
+  arrange(median_val)
+
+df_selected <- df_selected %>%
+  mutate(droplet_ID = factor(droplet_ID, levels = droplet_order$droplet_ID))
+
+global_mean <- mean(wt_long_ko_clean$intensity, na.rm = TRUE)
+
+ggplot(df_selected, aes(x = droplet_ID, y = intensity)) +
+  geom_boxplot(aes(fill = droplet_ID), show.legend = FALSE) +
+  geom_hline(yintercept = global_mean, color = "red", linetype = "dashed", size = 1) +
+  labs(
+    title = "Boxplots of Droplets (Selected by Significance)",
+    subtitle = "Red dashed line = global mean intensity",
+    x = "Droplet ID", y = "Intensity"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+ggplot(df_selected, aes(x = droplet_ID, y = log(intensity)) )+
+  geom_boxplot(aes(fill = droplet_ID), show.legend = FALSE) +
+  geom_hline(yintercept = log(global_mean), color = "red", linetype = "dashed", size = 1) +
+  labs(
+    title = "Boxplots of Droplets (Selected by Significance)",
+    subtitle = "Red dashed line = global mean intensity",
+    x = "Droplet ID", y = "Log Intensity"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+library(lme4)
+library(merTools)
+library(ggplot2)
+library(dplyr)
+
+pred_int <- predictInterval(model1_ko, level = 0.95)
+pred_int <- pred_int %>%
+  mutate(obs_id = row_number())
+global_mean <- mean(log(wt_long_ko_clean$intensity), na.rm = TRUE)
+
+pred_int <- pred_int %>%
+  mutate(significance = case_when(
+    upr < global_mean ~ "Below Mean",
+    lwr > global_mean ~ "Above Mean",
+    TRUE ~ "Not Different"
+  ))
+
+
+# Count number of cells by category
+pred_int%>%
+  count(significance)
+
+```
+
+
+
+
+
+
+This model adds global_mean_intensity as a fixed effect.
+The random intercept for Droplet_ID is still included, allowing each droplet to have its own baseline intensity.
+
+
+Intercept (9.04826): This is the estimated average log-intensity when the global_mean_intensity is at its reference value.
+
+The random effect variance (0.01021) remains the same as in model0, indicating that droplet-level variation is similar.
+The residual variance (3.63766) also remains unchanged, meaning that adding global_mean_intensity did not significantly improve the explanation of within-droplet variation.
+
+
+
+#mixed effect model for the whole dataset
+```{r}
+
+library(tidyverse)
+library(lme4)
+library(readr)
+
+experiment_wt11%>%
+  filter(protein_type=="mCardinal")
+
+whole_dt_long <- experiment_wt11 %>%
+  pivot_longer(
+    cols = starts_with("cell"), 
+    names_to = "cell",
+    values_to = "intensity"
+  )
+whole_dt_long <- whole_dt_long %>%
+  filter(!is.na(intensity) & intensity > 0) 
+
+
+model2 <- lmer(log(intensity) ~ 1+ (1 | Droplet_ID), data = whole_dt_long)
+
+
+summary(model2)
+```
+
+
+
+
+Adds protein_type as a fixed effect, allowing for comparison of different protein groups.
+Retains Droplet_ID as a random intercept, accounting for variation between droplets.
+Uses the entire dataset (whole_dt_long) instead of filtering for a specific time
+
+#mixed effect model for group effect
+```{r}
+library(dplyr)
+library(lme4)
+library(knitr)
+library(kableExtra)
+
+library(tidyverse)
+wt11_long <- experiment_wt11_4h %>%
+  pivot_longer(
+    cols = starts_with("cell"),
+    names_to = "cell",
+    values_to = "intensity"
+  ) %>%
+  mutate(group = 1)  
+
+
+
+# 2. Pivot KO 组数据
+experiment_ko11_4h <- experiment_ko11 %>%
+  filter(protein_type=="mCardinal" & time=="4h")
+
+ko11_long <- experiment_ko11_4h_red %>%
+  pivot_longer(
+    cols = starts_with("cell"),
+    names_to = "cell",
+    values_to = "intensity"
+  ) %>%
+  mutate(group = 0)  
+library(tidyverse)
+
+ko11_long <- ko11_long %>%
+  dplyr::select(droplet_ID, protein_type, time, cell, intensity, group)
+ 
+
+ko11_long <- ko11_long %>% drop_na(intensity)
+colnames(ko11_long) <- colnames(wt11_long)
+
+merged_data <- bind_rows(wt11_long, ko11_long)
+
+merged_data<- merged_data %>%
+  filter(!is.na(intensity) & intensity > 0&protein_type=="mCardinal") 
+fixed_model<-lm(log(intensity) ~ 1+as.factor(group),data = merged_data)
+summary(fixed_model)
+model3 <- lmer(log(intensity) ~ 1+as.factor(group)+ (1 | Droplet_ID), data = merged_data)
+
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+
+# -------------------------
+# 1. Fixed Effects Table
+# -------------------------
+fixed_table <- data.frame(
+  Effect = c("Intercept", "as.factor(group)1"),
+  Estimate = c(6.75237, 0.58195),
+  `Std. Error` = c(0.04841, 0.06803),
+  `t-value` = c(139.472, 8.554)
+)
+combined_table <- data.frame(
+  Term = c("Intercept", "as.factor(group)1", 
+           "Random: Droplet_ID (Intercept)", "Random: Residual", "ICC"),
+  Estimate = c(6.75237, 0.58195, 0.07441, 0.64410, 0.10352),
+  `Std. Error` = c(0.04841, 0.06803, 0.2728  ,0.8026  , NA),
+  `t-value` = c(139.472, 8.554, NA, NA, NA)
+)
+
+kable(combined_table, caption = "Fixed Effects, Random Effects and ICC from Mixed Model") %>%
+  kable_styling()
+```
+
+
+Droplet-level variability (0.0855) is much higher than in the previous model (0.005516), suggesting that within mCardinal, different droplets have more significant intensity differences.
+Residual variance (0.777 is lower compared to before (2.279810), meaning this filtered model explains more of the variation.
+
+
+```{r}
+plot(fitted(model3), resid(model3),
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residuals vs. Fitted Plot")
+abline(h = 0, lty = 2)
+
+```
+#including time as a fixed and continuous effect
+
+
+```{r}
+
+model5 <- lm(log(intensity) ~ 1+as.factor(group), data = merged_data)
+summary(model5)
+
+
+par(mfrow = c(2, 2))
+plot(model5)
+```
+```{r}
+model6 <- lm(sqrt(intensity) ~ 1+as.factor(group), data = merged_data)
+summary(model6)
+par(mfrow = c(2, 2))
+plot(model6)
+```
+
+This plot visualizes the predicted log-intensity values for two groups (KO = 0, WT = 1), along with the actual observed data points.
+
+The WT group (1) has a higher predicted log-intensity than KO (0).
+This means that the mean intensity of fluorescence is significantly higher in WT droplets.
+Statistical Confidence
+
+The confidence intervals do not overlap much, suggesting a likely significant difference between the two groups.
+
+
+
+
+```{r}
+
+library(merTools) 
+library(dplyr)
+library(tidyverse)
+wt11_all <- experiment_wt11 %>%
+  pivot_longer(
+    cols = starts_with("cell"),
+    names_to = "cell",
+    values_to = "intensity"
+  ) %>%
+   mutate(
+    time = str_remove(time, "h"))
+
+
+wt11_all <- wt11_all %>%
+  filter(!is.na(intensity) & intensity > 0 & protein_type=="mCardinal") 
+
+
+```
+
+```{r}
+wt11_all
+wt11_all$time_numeric <- as.numeric(gsub("h", "", wt11_all$time))
+model5 <- lmer(log(intensity) ~ 1+time_numeric + I(time_numeric^2) + (1 | Droplet_ID), data = wt11_all)
+
+```
+### ko
+```{r}
+ko11_all <- experiment_ko11 %>%
+  pivot_longer(
+    cols = starts_with("cell"),
+    names_to = "cell",
+    values_to = "intensity"
+  ) 
+
+ko11_all <- ko11_all %>%
+  filter(!is.na(intensity) & intensity > 0 & protein_type=="mCardinal") 
+
+ko11_all$time_numeric <- as.numeric(gsub("h", "", ko11_all$time))
+model6 <- lmer(log(intensity) ~ 1+time_numeric + I(time_numeric^2) + (1 | droplet_ID), data = ko11_all)
+model6.2<-lmer(log(intensity) ~ 1+as.factor(time) + (1 | droplet_ID), data = ko11_all)
+summary(model6.2)
+
+predictInterval(model6)  
+
+REsim(model6)            
+
+plotREsim(REsim(model6))  
+```
+### group+ time
+
+```{r}
+wt11_long <- experiment_wt11 %>%
+  pivot_longer(
+    cols = starts_with("cell"),
+    names_to = "cell",
+    values_to = "intensity"
+  ) %>%
+  mutate(group = 1)  
+
+
+
+# 2. Pivot KO 组数据
+experiment_ko11 <- experiment_ko11 %>%
+  filter(protein_type=="mCardinal")
+
+ko11_long <- experiment_ko11 %>%
+  pivot_longer(
+    cols = starts_with("cell"),
+    names_to = "cell",
+    values_to = "intensity"
+  ) %>%
+  mutate(group = 0)  
+
+
+library(tidyverse)
+
+ko11_long <- ko11_long %>%
+  dplyr::select(droplet_ID, protein_type, time, cell, intensity, group)
+ 
+
+ko11_long <- ko11_long %>% drop_na(intensity)
+colnames(ko11_long) <- colnames(wt11_long)
+
+merged_data_all <- bind_rows(wt11_long, ko11_long)
+
+merged_data_all$time_numeric <- as.numeric(gsub("h", "", merged_data_all$time))
+
+merged_data_all <- merged_data_all %>%
+  filter(!is.na(intensity) & intensity > 0 & protein_type == "mCardinal")
+summary(merged_data_all$intensity)
+any(is.na(merged_data_all$intensity))  
+
+
+model7<-lmer(log(intensity)~ 1+time_numeric + I(time_numeric^2) + as.factor(group)+
+               (1 | Droplet_ID),data=merged_data_all)
+summary(model7)
+
+
+# Variance components
+var_droplet <- 0.07448
+var_residual <- 0.64502
+
+# ICC calculation
+icc <- var_droplet / (var_droplet + var_residual)
+
+fixed_effects <- data.frame(
+  Term = rownames(summary(model7)$coefficients),
+  Estimate = summary(model7)$coefficients[, "Estimate"],
+  `Std. Error` = summary(model7)$coefficients[, "Std. Error"],
+  `t value` = summary(model7)$coefficients[, "t value"],
+  row.names = NULL
+)
+
+fixed_effects <- rbind(
+  fixed_effects,
+  data.frame(
+    Term = "ICC",
+    Estimate = round(icc, 5),
+    `Std. Error` = NA,
+    `t value` = NA
+  )
+)
+
+# Output with knitr
+library(knitr)
+kable(fixed_effects, digits = 5, caption = "Fixed Effects and ICC from Mixed Model")
+
+# Print the updated table
+kable(fixed_effects, digits = 5, caption = "Fixed Effects and ICC from Mixed Model")
+
+```
+
+
+### time as factor
+
+```{r}
+model9<-lmer(log(intensity)~ 1+as.factor(time)+as.factor(group)+
+               (1 | Droplet_ID),data=merged_data_all)
+summary(model9)
+
+
+library(lme4)
+library(knitr)
+
+# 1. Summarize fixed effects
+coefs9 <- summary(model9)$coefficients
+
+fixed_effects_9 <- data.frame(
+  Term = rownames(coefs9),
+  Estimate = coefs9[, "Estimate"],
+  `Std. Error` = coefs9[, "Std. Error"],
+  `t value` = coefs9[, "t value"],
+  row.names = NULL
+)
+
+# 2. Extract variance components and compute ICC
+var_droplet <- as.numeric(VarCorr(model9)$Droplet_ID)
+var_residual <- attr(VarCorr(model9), "sc")^2
+icc <- var_droplet / (var_droplet + var_residual)
+
+# 3. Append ICC
+fixed_effects_9 <- rbind(
+  fixed_effects_9,
+  data.frame(
+    Term = "ICC",
+    Estimate = round(icc, 5),
+    `Std. Error` = NA,
+    `t value` = NA
+  )
+)
+
+# 4. Display as table
+kable(fixed_effects_9, digits = 5, caption = "Fixed Effects and ICC for model9 (Time as Factor)")
+
+```
+
+#anova
+```{r}
+anova_wt<-aov(lm(log(intensity) ~ factor( Droplet_ID), data = wt_long_clean_wt))
+summary(anova_wt)
+```
+```{r}
+anova_ko<-aov(lm(log(intensity) ~ factor(droplet_ID), data = wt_long_ko_clean))
+summary(anova_ko)
+
+```
+
+
+#interaction model
+```{r}
+model10<-lmer(log(intensity)~ 1+group+time_numeric+I(time_numeric^2)+group*time_numeric+
+               (1 | Droplet_ID),data=merged_data_all)
+
+summary(model10)
+```
+```{r}
+
+```
+
